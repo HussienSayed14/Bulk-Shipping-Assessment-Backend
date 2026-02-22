@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 from decouple import config
 from datetime import timedelta
@@ -40,6 +41,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'django_filters',
+    'drf_spectacular',
 
     # Local apps
     'apps.users',
@@ -160,6 +162,41 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 50,
     'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+
+# =============================================================================
+# DRF SPECTACULAR (SWAGGER) CONFIGURATION
+# =============================================================================
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Bulk Shipping Label Platform API',
+    'DESCRIPTION': 'API for bulk shipping label creation — upload CSV, review, select shipping, and purchase labels.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+
+    # JWT auth in Swagger UI
+    'SECURITY': [{'Bearer': []}],
+    'APPEND_COMPONENTS': {
+        'securitySchemes': {
+            'Bearer': {
+                'type': 'http',
+                'scheme': 'bearer',
+                'bearerFormat': 'JWT',
+            }
+        }
+    },
+
+    # Organize endpoints by app
+    'TAGS': [
+        {'name': 'Auth', 'description': 'Login, token refresh, user profile'},
+        {'name': 'Saved Addresses', 'description': 'Manage saved ship-from addresses'},
+        {'name': 'Saved Packages', 'description': 'Manage saved package presets'},
+        {'name': 'Batches', 'description': 'CSV upload and batch management'},
+        {'name': 'Shipments', 'description': 'Individual shipment records'},
+        {'name': 'Billing', 'description': 'Transactions and balance'},
+    ],
 }
 
 
@@ -204,3 +241,141 @@ SMARTY_AUTH_TOKEN = config('SMARTY_AUTH_TOKEN', default='')
 # Max upload size: 10MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
+
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+LOGS_DIR = BASE_DIR / 'logs'
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+
+    'formatters': {
+        'verbose': {
+            'format': '{asctime} [{levelname}] {name} {module}.{funcName}:{lineno} - {message}',
+            'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+        'simple': {
+            'format': '{asctime} [{levelname}] - {message}',
+            'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+    },
+
+    'filters': {
+        'require_debug_true': {
+            '()': 'django.utils.log.RequireDebugTrue',
+        },
+        'require_debug_false': {
+            '()': 'django.utils.log.RequireDebugFalse',
+        },
+    },
+
+    'handlers': {
+        'console': {
+            'level': 'DEBUG',
+            'filters': ['require_debug_true'],
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+        'app_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': LOGS_DIR / 'app.log',
+            'maxBytes': 5 * 1024 * 1024,
+            'backupCount': 5,
+            'formatter': 'verbose',
+            'encoding': 'utf-8',
+        },
+        'error_file': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': LOGS_DIR / 'error.log',
+            'maxBytes': 5 * 1024 * 1024,
+            'backupCount': 5,
+            'formatter': 'verbose',
+            'encoding': 'utf-8',
+        },
+        'api_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': LOGS_DIR / 'api.log',
+            'maxBytes': 5 * 1024 * 1024,
+            'backupCount': 3,
+            'formatter': 'verbose',
+            'encoding': 'utf-8',
+        },
+        'verification_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': LOGS_DIR / 'address_verification.log',
+            'maxBytes': 5 * 1024 * 1024,
+            'backupCount': 3,
+            'formatter': 'verbose',
+            'encoding': 'utf-8',
+        },
+    },
+
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'app_file', 'error_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['error_file', 'console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'apps.users': {
+            'handlers': ['console', 'api_file', 'error_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'apps.addresses': {
+            'handlers': ['console', 'api_file', 'error_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'apps.packages': {
+            'handlers': ['console', 'api_file', 'error_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'apps.shipments': {
+            'handlers': ['console', 'api_file', 'error_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'apps.shipments.services.csv_parser': {
+            'handlers': ['console', 'api_file', 'error_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'apps.shipments.services.address_verifier': {
+            'handlers': ['console', 'verification_file', 'error_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'apps.shipments.services.rate_calculator': {
+            'handlers': ['console', 'api_file', 'error_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'apps.billing': {
+            'handlers': ['console', 'api_file', 'error_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+
+    'root': {
+        'handlers': ['console', 'app_file', 'error_file'],
+        'level': 'INFO',
+    },
+}
