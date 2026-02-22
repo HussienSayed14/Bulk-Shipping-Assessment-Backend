@@ -20,6 +20,10 @@ urlpatterns = [
     path('batches/<int:batch_id>/shipments/bulk-update-shipping/', views.bulk_update_shipping, name='bulk-update-shipping'),
     path('batches/<int:batch_id>/shipments/bulk-delete/', views.bulk_delete, name='bulk-delete'),
 
+    # Address verification
+    path('shipments/<int:shipment_id>/verify/<str:address_type>/', views.verify_address_view, name='verify-address'),
+    path('batches/<int:batch_id>/shipments/bulk-verify/', views.bulk_verify_addresses, name='bulk-verify'),
+
     # Shipping rates
     path('shipping-rates/', views.shipping_rates, name='shipping-rates'),
     path('batches/<int:batch_id>/calculate-rates/', views.calculate_batch_rates, name='calculate-rates'),

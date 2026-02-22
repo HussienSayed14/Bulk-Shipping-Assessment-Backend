@@ -8,6 +8,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 
+from apps.shipments.services.address_verifier import verify_record_address
+
 from .models import ShipmentBatch, ShipmentRecord
 from .serializers import (
     ShipmentBatchSerializer,
@@ -750,3 +752,180 @@ def purchase_batch(request, batch_id):
         'label_size': batch.get_label_size_display(), # type: ignore
         'new_balance': float(profile.balance),
     })
+
+
+
+"""
+ADD THESE VIEWS TO THE BOTTOM OF apps/shipments/views.py
+Also add this import at the top of views.py:
+
+from .services.address_verifier import verify_record_address
+"""
+
+
+# =============================================================================
+# ADDRESS VERIFICATION
+# =============================================================================
+
+@extend_schema(
+    tags=['Shipments'],
+    request=None,
+    description='Verify an address on a shipment record. Pass address_type as "from" or "to" in the URL.',
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def verify_address_view(request, shipment_id, address_type):
+    """Verify a single address (from or to) on a shipment record."""
+
+    if address_type not in ['from', 'to']:
+        return Response(
+            {'error': 'address_type must be "from" or "to".'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        record = ShipmentRecord.objects.get(
+            pk=shipment_id, batch__user=request.user
+        )
+    except ShipmentRecord.DoesNotExist:
+        return Response({'error': 'Record not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Don't verify if record is invalid — user should fix errors first
+    if not record.is_valid:
+        return Response(
+            {
+                'error': 'Record has validation errors. Fix them before verifying.',
+                'validation_errors': record.validation_errors,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Run verification
+    result = verify_record_address(record, address_type)
+
+    # Update verification status on the record
+    if address_type == 'from':
+        record.from_address_verified = (
+            ShipmentRecord.VerificationStatus.VERIFIED if result['verified']
+            else ShipmentRecord.VerificationStatus.FAILED
+        )
+    else:
+        record.to_address_verified = (
+            ShipmentRecord.VerificationStatus.VERIFIED if result['verified']
+            else ShipmentRecord.VerificationStatus.FAILED
+        )
+    record.save()
+
+    logger.info(
+        f"Address verification ({address_type}) for record #{shipment_id}: "
+        f"{'passed' if result['verified'] else 'failed'}"
+    )
+
+    return Response({
+        'shipment_id': shipment_id,
+        'address_type': address_type,
+        'verified': result['verified'],
+        'errors': result['errors'],
+        'warnings': result['warnings'],
+        'suggestions': result['suggestions'],
+    })
+
+
+@extend_schema(
+    tags=['Shipments'],
+    description='Bulk verify addresses for selected records. Only verifies records that are valid.',
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def bulk_verify_addresses(request, batch_id):
+    """Verify addresses for multiple shipment records."""
+
+    try:
+        batch = ShipmentBatch.objects.get(pk=batch_id, user=request.user)
+    except ShipmentBatch.DoesNotExist:
+        return Response({'error': 'Batch not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    shipment_ids = request.data.get('shipment_ids', [])
+    address_type = request.data.get('address_type', 'to')
+
+    if address_type not in ['from', 'to', 'both']:
+        return Response(
+            {'error': 'address_type must be "from", "to", or "both".'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Get records — only valid ones
+    records = ShipmentRecord.objects.filter(batch=batch, is_valid=True)
+    if shipment_ids:
+        records = records.filter(pk__in=shipment_ids)
+
+    results = {
+        'total': records.count(),
+        'verified': 0,
+        'failed': 0,
+        'skipped': 0,
+        'details': [],
+    }
+
+    records_to_update = []
+
+    for record in records:
+        record_result = {'shipment_id': record.pk, 'row_number': record.row_number}
+
+        if address_type in ['to', 'both']:
+            to_result = verify_record_address(record, 'to')
+            record.to_address_verified = (
+                ShipmentRecord.VerificationStatus.VERIFIED if to_result['verified']
+                else ShipmentRecord.VerificationStatus.FAILED
+            )
+            record_result['to_verified'] = to_result['verified']
+            record_result['to_warnings'] = to_result['warnings']
+
+        if address_type in ['from', 'both']:
+            from_result = verify_record_address(record, 'from')
+            record.from_address_verified = (
+                ShipmentRecord.VerificationStatus.VERIFIED if from_result['verified']
+                else ShipmentRecord.VerificationStatus.FAILED
+            )
+            record_result['from_verified'] = from_result['verified']
+            record_result['from_warnings'] = from_result['warnings']
+
+        # Count results
+        all_passed = True
+        if address_type in ['to', 'both'] and not to_result['verified']:
+            all_passed = False
+        if address_type in ['from', 'both'] and not from_result['verified']:
+            all_passed = False
+
+        if all_passed:
+            results['verified'] += 1
+        else:
+            results['failed'] += 1
+
+        results['details'].append(record_result)
+        records_to_update.append(record)
+
+    # Bulk save
+    update_fields = []
+    if address_type in ['to', 'both']:
+        update_fields.append('to_address_verified')
+    if address_type in ['from', 'both']:
+        update_fields.append('from_address_verified')
+
+    if records_to_update and update_fields:
+        ShipmentRecord.objects.bulk_update(records_to_update, update_fields)
+
+    # Count skipped (invalid records that weren't verified)
+    if shipment_ids:
+        total_requested = len(shipment_ids)
+    else:
+        total_requested = batch.records.count() # type: ignore
+    results['skipped'] = total_requested - results['total']
+
+    logger.info(
+        f"Bulk verify ({address_type}) for batch #{batch_id}: "
+        f"{results['verified']} verified, {results['failed']} failed, "
+        f"{results['skipped']} skipped"
+    )
+
+    return Response(results)
