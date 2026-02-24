@@ -634,25 +634,31 @@ def calculate_batch_rates(request, batch_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    records = list(batch.records.all())# type: ignore
+    # Only calculate for valid records
+    valid_records = list(batch.records.filter(is_valid=True)) # type: ignore
+    skipped = batch.records.filter(is_valid=False).count() # type: ignore
 
     with transaction.atomic():
-        for record in records:
+        for record in valid_records:
             if not record.shipping_service:
                 record.shipping_service = default_service
             record.shipping_cost = calculate_cost_for_record(record)
 
-        ShipmentRecord.objects.bulk_update(records, ['shipping_service', 'shipping_cost'])
+        ShipmentRecord.objects.bulk_update(valid_records, ['shipping_service', 'shipping_cost'])
+
+        # Reset cost for invalid records (in case they had old costs)
+        batch.records.filter(is_valid=False).update(shipping_service='', shipping_cost=0) # type: ignore
+
         batch.recalculate_stats()
 
-    logger.info(f"Batch #{batch_id} rates calculated: total ${batch.total_cost}")
+    logger.info(f"Batch #{batch_id} rates calculated: {len(valid_records)} priced, {skipped} skipped, total ${batch.total_cost}")
 
     return Response({
-        'message': f'Rates calculated for {len(records)} records.',
+        'message': f'Rates calculated for {len(valid_records)} valid records. {skipped} invalid records skipped.',
+        'priced_count': len(valid_records),
+        'skipped_count': skipped,
         'total_cost': float(batch.total_cost),
     })
-
-
 # =============================================================================
 # PURCHASE
 # =============================================================================
