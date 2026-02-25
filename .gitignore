@@ -47,6 +47,3 @@ htmlcov/
 .coverage.*
 coverage.xml
 *.cover
-
-# add this line to .gitignore
-logs/
