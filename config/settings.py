@@ -228,6 +228,13 @@ SIMPLE_JWT = {
 # CORS CONFIGURATION
 # =============================================================================
 
+CSRF_TRUSTED_ORIGINS = config(
+    "CSRF_TRUSTED_ORIGINS",
+    default="https://bulk-shipping.h-tech.live"
+).split(",") # type: ignore
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 CORS_ALLOWED_ORIGINS = config(
     'CORS_ALLOWED_ORIGINS',
     default='http://localhost:5173,http://localhost:3000'
