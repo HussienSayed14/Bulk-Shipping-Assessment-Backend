@@ -27,6 +27,17 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='').split(',')  # type: ignore
 
 
+# USPS REST API (new — apis.usps.com)
+# Register at: https://developers.usps.com
+# Create an app → get Client ID and Client Secret
+USPS_CLIENT_ID = config('USPS_CLIENT_ID', default='')
+USPS_CLIENT_SECRET = config('USPS_CLIENT_SECRET', default='')
+
+# Smarty (formerly SmartyStreets) — fallback
+# Register at: https://www.smarty.com/pricing (free tier = 250/month)
+SMARTY_AUTH_ID = config('SMARTY_AUTH_ID', default='')
+SMARTY_AUTH_TOKEN = config('SMARTY_AUTH_TOKEN', default='')
+
 # Application definition
 
 INSTALLED_APPS = [
