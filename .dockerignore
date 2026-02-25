@@ -11,3 +11,4 @@ build/
 .git/
 .gitignore
 node_modules/
+db.sqlite3
